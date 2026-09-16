@@ -1,15 +1,3 @@
-// src/types/database.ts
-//
-// TypeScript types that mirror the Supabase Postgres schema exactly.
-// Keep this file in sync with the SQL schema in README.md if columns change.
-//
-// FIX (round 2): each table also needs a `Relationships` array (even if
-// empty) alongside Row/Insert/Update. Without it, @supabase/supabase-js's
-// internal GenericSchema/GenericTable constraint check fails for the
-// WHOLE schema (not just the affected table), and every .insert()/
-// .update()/.rpc() call silently resolves to `never` — which is exactly
-// the class of error this fixes.
-
 export type UserRole = 'reporter' | 'admin' | 'superadmin'
 
 export type IncidentStatus = 'open' | 'in_progress' | 'resolved'
