@@ -2,18 +2,18 @@
 //
 // Central identity provider for the app. Tracks the Supabase auth session
 // and the matching `profiles` row (role + org_id), and exposes sign in /
-// sign up (create-new-org or join-existing-org) / sign out actions via
-// the useAuth() hook.
+// sign up (create-new-org or redeem-invite) / sign out actions via the
+// useAuth() hook.
+//
+// UPDATED for phase 2: joining an org now happens via a redeemed invite
+// token (RPC) instead of picking from a public list of organizations.
+// fetchOrganizations() / signUpJoinOrg() have been replaced by
+// previewInvite() / signUpWithInvite().
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import type { Profile, UserRole } from '../types/database'
+import type { Profile } from '../types/database'
 import type { Session, User } from '@supabase/supabase-js'
-
-export interface OrgOption {
-  id: string
-  name: string
-}
 
 interface SignUpCreateOrgParams {
   email: string
@@ -22,11 +22,17 @@ interface SignUpCreateOrgParams {
   orgName: string
 }
 
-interface SignUpJoinOrgParams {
+interface SignUpWithInviteParams {
   email: string
   password: string
   fullName: string
-  orgId: string
+  inviteToken: string
+}
+
+export interface InvitePreview {
+  orgName: string | null
+  role: string | null
+  isValid: boolean
 }
 
 interface AuthContextValue {
@@ -36,9 +42,9 @@ interface AuthContextValue {
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signUpCreateOrg: (params: SignUpCreateOrgParams) => Promise<{ error: string | null }>
-  signUpJoinOrg: (params: SignUpJoinOrgParams) => Promise<{ error: string | null }>
+  signUpWithInvite: (params: SignUpWithInviteParams) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
-  fetchOrganizations: () => Promise<OrgOption[]>
+  previewInvite: (token: string) => Promise<InvitePreview>
   refreshProfile: () => Promise<void>
 }
 
@@ -134,8 +140,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [loadProfile]
   )
 
-  const signUpJoinOrg = useCallback(
-    async ({ email, password, fullName, orgId }: SignUpJoinOrgParams) => {
+  const signUpWithInvite = useCallback(
+    async ({ email, password, fullName, inviteToken }: SignUpWithInviteParams) => {
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
@@ -148,16 +154,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      const newProfile: Partial<Profile> & { id: string; org_id: string; role: UserRole } = {
-        id: signUpData.user.id,
-        org_id: orgId,
-        role: 'reporter',
-        full_name: fullName,
-        assigned_locations: [],
-      }
-
-      const { error: profileError } = await supabase.from('profiles').insert(newProfile)
-      if (profileError) return { error: profileError.message }
+      const { error: rpcError } = await supabase.rpc('redeem_invite', {
+        invite_token: inviteToken.trim(),
+        new_full_name: fullName,
+      })
+      if (rpcError) return { error: rpcError.message }
 
       await loadProfile(signUpData.user.id)
       return { error: null }
@@ -170,17 +171,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(null)
   }, [])
 
-  const fetchOrganizations = useCallback(async (): Promise<OrgOption[]> => {
-    const { data, error } = await supabase
-      .from('organizations')
-      .select('id, name')
-      .order('name', { ascending: true })
-
-    if (error) {
-      console.error('Failed to fetch organizations:', error.message)
-      return []
+  const previewInvite = useCallback(async (token: string): Promise<InvitePreview> => {
+    if (!token.trim()) {
+      return { orgName: null, role: null, isValid: false }
     }
-    return (data ?? []) as OrgOption[]
+
+    const { data, error } = await supabase
+      .rpc('preview_invite', { invite_token: token.trim() })
+      .maybeSingle()
+
+    if (error || !data) {
+      return { orgName: null, role: null, isValid: false }
+    }
+
+    return {
+      orgName: (data as { org_name: string | null }).org_name,
+      role: (data as { invite_role: string | null }).invite_role,
+      isValid: (data as { is_valid: boolean }).is_valid,
+    }
   }, [])
 
   const value: AuthContextValue = {
@@ -190,9 +198,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loading,
     signIn,
     signUpCreateOrg,
-    signUpJoinOrg,
+    signUpWithInvite,
     signOut,
-    fetchOrganizations,
+    previewInvite,
     refreshProfile,
   }
 
@@ -205,4 +213,4 @@ export function useAuth(): AuthContextValue {
     throw new Error('useAuth must be used within an AuthProvider')
   }
   return ctx
-}
+          }
