@@ -3,7 +3,10 @@
 // TypeScript types that mirror the Supabase Postgres schema exactly.
 // Keep this file in sync with the SQL schema in README.md if columns change.
 //
-// UPDATED for phase 2: added the Invite type/table entry.
+// FIX: the Database type must declare Views/Functions/Enums/CompositeTypes
+// alongside Tables, or @supabase/supabase-js's generic type matching fails
+// silently and every .from(...).insert(...)/.update(...) call resolves to
+// `never`, and every .rpc(...) call loses its argument types entirely.
 
 export type UserRole = 'reporter' | 'admin' | 'superadmin'
 
@@ -89,7 +92,7 @@ export interface IncidentUpdateWithUser extends IncidentUpdate {
 // -----------------------------------------------------------------
 // Supabase generated-style Database type.
 // This lets us type the supabase-js client (createClient<Database>(...))
-// for full autocomplete + type safety on .from('table') calls.
+// for full autocomplete + type safety on .from('table') and .rpc(...) calls.
 // -----------------------------------------------------------------
 
 export interface Database {
@@ -140,5 +143,26 @@ export interface Database {
         Update: Partial<Invite>
       }
     }
+    Views: Record<string, never>
+    Functions: {
+      create_organization_and_admin_profile: {
+        Args: { org_name: string; admin_full_name: string }
+        Returns: string
+      }
+      redeem_invite: {
+        Args: { invite_token: string; new_full_name: string }
+        Returns: string
+      }
+      preview_invite: {
+        Args: { invite_token: string }
+        Returns: {
+          org_name: string | null
+          invite_role: string | null
+          is_valid: boolean
+        }[]
+      }
+    }
+    Enums: Record<string, never>
+    CompositeTypes: Record<string, never>
   }
 }
