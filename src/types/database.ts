@@ -3,10 +3,12 @@
 // TypeScript types that mirror the Supabase Postgres schema exactly.
 // Keep this file in sync with the SQL schema in README.md if columns change.
 //
-// FIX: the Database type must declare Views/Functions/Enums/CompositeTypes
-// alongside Tables, or @supabase/supabase-js's generic type matching fails
-// silently and every .from(...).insert(...)/.update(...) call resolves to
-// `never`, and every .rpc(...) call loses its argument types entirely.
+// FIX (round 2): each table also needs a `Relationships` array (even if
+// empty) alongside Row/Insert/Update. Without it, @supabase/supabase-js's
+// internal GenericSchema/GenericTable constraint check fails for the
+// WHOLE schema (not just the affected table), and every .insert()/
+// .update()/.rpc() call silently resolves to `never` — which is exactly
+// the class of error this fixes.
 
 export type UserRole = 'reporter' | 'admin' | 'superadmin'
 
@@ -102,16 +104,19 @@ export interface Database {
         Row: Organization
         Insert: Partial<Organization> & { name: string }
         Update: Partial<Organization>
+        Relationships: []
       }
       profiles: {
         Row: Profile
         Insert: Partial<Profile> & { id: string; org_id: string; role: UserRole }
         Update: Partial<Profile>
+        Relationships: []
       }
       locations: {
         Row: Location
         Insert: Partial<Location> & { org_id: string; name: string }
         Update: Partial<Location>
+        Relationships: []
       }
       incidents: {
         Row: Incident
@@ -123,6 +128,7 @@ export interface Database {
           description: string
         }
         Update: Partial<Incident>
+        Relationships: []
       }
       incident_updates: {
         Row: IncidentUpdate
@@ -132,6 +138,7 @@ export interface Database {
           note: string
         }
         Update: Partial<IncidentUpdate>
+        Relationships: []
       }
       invites: {
         Row: Invite
@@ -141,6 +148,7 @@ export interface Database {
           created_by: string
         }
         Update: Partial<Invite>
+        Relationships: []
       }
     }
     Views: Record<string, never>
@@ -165,4 +173,4 @@ export interface Database {
     Enums: Record<string, never>
     CompositeTypes: Record<string, never>
   }
-}
+  }
