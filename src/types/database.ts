@@ -2,12 +2,16 @@
 //
 // TypeScript types that mirror the Supabase Postgres schema exactly.
 // Keep this file in sync with the SQL schema in README.md if columns change.
+//
+// UPDATED for phase 2: added the Invite type/table entry.
 
 export type UserRole = 'reporter' | 'admin' | 'superadmin'
 
 export type IncidentStatus = 'open' | 'in_progress' | 'resolved'
 
 export type IncidentPriority = 'low' | 'medium' | 'high'
+
+export type InviteRole = 'reporter' | 'admin'
 
 export interface Organization {
   id: string
@@ -52,6 +56,18 @@ export interface IncidentUpdate {
   incident_id: string
   user_id: string
   note: string
+  created_at: string
+}
+
+export interface Invite {
+  id: string
+  org_id: string
+  role: InviteRole
+  token: string
+  created_by: string
+  max_uses: number
+  uses: number
+  expires_at: string | null
   created_at: string
 }
 
@@ -114,6 +130,15 @@ export interface Database {
         }
         Update: Partial<IncidentUpdate>
       }
+      invites: {
+        Row: Invite
+        Insert: Partial<Invite> & {
+          org_id: string
+          role: InviteRole
+          created_by: string
+        }
+        Update: Partial<Invite>
+      }
     }
   }
-      }
+}
