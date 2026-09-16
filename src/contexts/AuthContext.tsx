@@ -5,10 +5,20 @@
 // sign up (create-new-org or redeem-invite) / sign out actions via the
 // useAuth() hook.
 //
-// UPDATED for phase 2: joining an org now happens via a redeemed invite
-// token (RPC) instead of picking from a public list of organizations.
-// fetchOrganizations() / signUpJoinOrg() have been replaced by
-// previewInvite() / signUpWithInvite().
+// FIX: signUp() returns a `user` object even when Supabase's "Confirm
+// email" setting is ON — but in that case there's no active `session`
+// yet, so an immediate .rpc() call runs UNAUTHENTICATED (auth.uid() is
+// null inside the database function), which previously surfaced as a
+// confusing raw Postgres error ("null value in column 'id' ..."). We
+// now check for `session` (not just `user`) before attempting the RPC,
+// and show a clear message instead.
+//
+// NOTE: with email confirmation ON, the org/invite RPC genuinely cannot
+// run until the user has a session — and this app doesn't yet persist
+// "finish creating my org" across the confirmation-email round trip.
+// For now, either keep "Confirm email" OFF in Supabase (recommended
+// for internal rollout — see README), or treat this message as a
+// signal to build a proper "resume after confirming" flow later.
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
@@ -49,6 +59,11 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
+
+const EMAIL_CONFIRMATION_MESSAGE =
+  'Check your email to confirm your account. After confirming, come back and log in — ' +
+  'if your organization or invite wasn\'t set up yet, sign up again with the same details ' +
+  'once you have an active session.'
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
@@ -121,11 +136,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         password,
       })
       if (signUpError) return { error: signUpError.message }
-      if (!signUpData.user) {
-        return {
-          error:
-            'Check your email to confirm your account, then log in again to finish setting up your organization.',
-        }
+
+      // signUp() can return a `user` even when there's no active
+      // `session` yet (email confirmation required). Without a
+      // session, the RPC below would run unauthenticated and fail.
+      if (!signUpData.session) {
+        return { error: EMAIL_CONFIRMATION_MESSAGE }
       }
 
       const { error: rpcError } = await supabase.rpc('create_organization_and_admin_profile', {
@@ -134,7 +150,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       if (rpcError) return { error: rpcError.message }
 
-      await loadProfile(signUpData.user.id)
+      await loadProfile(signUpData.user!.id)
       return { error: null }
     },
     [loadProfile]
@@ -147,11 +163,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         password,
       })
       if (signUpError) return { error: signUpError.message }
-      if (!signUpData.user) {
-        return {
-          error:
-            'Check your email to confirm your account, then log in again to finish joining your organization.',
-        }
+
+      if (!signUpData.session) {
+        return { error: EMAIL_CONFIRMATION_MESSAGE }
       }
 
       const { error: rpcError } = await supabase.rpc('redeem_invite', {
@@ -160,7 +174,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       if (rpcError) return { error: rpcError.message }
 
-      await loadProfile(signUpData.user.id)
+      await loadProfile(signUpData.user!.id)
       return { error: null }
     },
     [loadProfile]
@@ -213,4 +227,4 @@ export function useAuth(): AuthContextValue {
     throw new Error('useAuth must be used within an AuthProvider')
   }
   return ctx
-          }
+              }
