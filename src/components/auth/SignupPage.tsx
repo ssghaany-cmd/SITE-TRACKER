@@ -4,55 +4,76 @@
 // flow with min-h-screen so Android Chrome's keyboard just scrolls
 // the page instead of breaking the layout.
 //
-// Two modes, chosen via a <select> dropdown (not a modal/wizard):
-//   - "create": user is setting up a brand-new organization and
-//                becomes its admin (see create_organization_and_admin_profile RPC)
-//   - "join":   user is joining an existing organization, picked from
-//                a dropdown, and always lands as a 'reporter'
+// UPDATED for phase 2: joining an org now happens via an invite code
+// (redeemed through a database function) instead of a public dropdown
+// of every organization's name. If the page is opened with
+// ?invite=TOKEN in the URL (from a link an admin shared), the token
+// is pre-filled and previewed automatically. No router/new dependency
+// is used — just the browser's built-in URLSearchParams.
 //
-// There is no free-choice role dropdown here on purpose — letting a
-// signing-up user pick their own role would be a privilege-escalation
-// hole. Admin/superadmin promotion happens via an existing admin
-// editing a profile's role after the fact.
+// Two modes:
+//   - "create": user is setting up a brand-new organization and
+//                becomes its admin
+//   - "invite": user has an invite code from an existing org's admin
+//                and joins with whatever role that invite grants
+//                (reporter or admin — decided by whoever created it)
 
 import { useState, useEffect, type FormEvent } from 'react'
-import { useAuth, type OrgOption } from '../../contexts/AuthContext'
+import { useAuth, type InvitePreview } from '../../contexts/AuthContext'
 
 interface SignupPageProps {
   onSwitchToLogin: () => void
 }
 
-type SignupMode = 'create' | 'join'
+type SignupMode = 'create' | 'invite'
+
+function getInviteTokenFromUrl(): string {
+  if (typeof window === 'undefined') return ''
+  return new URLSearchParams(window.location.search).get('invite') ?? ''
+}
 
 export default function SignupPage({ onSwitchToLogin }: SignupPageProps) {
-  const { signUpCreateOrg, signUpJoinOrg, fetchOrganizations } = useAuth()
+  const { signUpCreateOrg, signUpWithInvite, previewInvite } = useAuth()
 
-  const [mode, setMode] = useState<SignupMode>('create')
+  const initialToken = getInviteTokenFromUrl()
+  const [mode, setMode] = useState<SignupMode>(initialToken ? 'invite' : 'create')
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [orgName, setOrgName] = useState('')
-  const [orgId, setOrgId] = useState('')
-  const [orgOptions, setOrgOptions] = useState<OrgOption[]>([])
-  const [orgsLoading, setOrgsLoading] = useState(true)
+  const [inviteToken, setInviteToken] = useState(initialToken)
+  const [invitePreview, setInvitePreview] = useState<InvitePreview | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
 
   const [error, setError] = useState<string | null>(null)
   const [infoMessage, setInfoMessage] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
+  // Auto-preview whenever the invite token changes (debounced lightly
+  // via a short delay so we're not firing a request on every keystroke).
   useEffect(() => {
-    let mounted = true
-    fetchOrganizations().then((orgs) => {
-      if (mounted) {
-        setOrgOptions(orgs)
-        setOrgsLoading(false)
-      }
-    })
-    return () => {
-      mounted = false
+    if (mode !== 'invite' || !inviteToken.trim()) {
+      setInvitePreview(null)
+      return
     }
-  }, [fetchOrganizations])
+
+    let cancelled = false
+    setPreviewLoading(true)
+    const timeout = setTimeout(() => {
+      previewInvite(inviteToken).then((result) => {
+        if (!cancelled) {
+          setInvitePreview(result)
+          setPreviewLoading(false)
+        }
+      })
+    }, 400)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timeout)
+    }
+  }, [inviteToken, mode, previewInvite])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -75,9 +96,15 @@ export default function SignupPage({ onSwitchToLogin }: SignupPageProps) {
       setError('Please enter a name for your organization.')
       return
     }
-    if (mode === 'join' && !orgId) {
-      setError('Please select your organization.')
-      return
+    if (mode === 'invite') {
+      if (!inviteToken.trim()) {
+        setError('Please enter your invite code.')
+        return
+      }
+      if (invitePreview && !invitePreview.isValid) {
+        setError('This invite code is invalid, expired, or already used.')
+        return
+      }
     }
 
     setSubmitting(true)
@@ -90,11 +117,11 @@ export default function SignupPage({ onSwitchToLogin }: SignupPageProps) {
             fullName: fullName.trim(),
             orgName: orgName.trim(),
           })
-        : await signUpJoinOrg({
+        : await signUpWithInvite({
             email: email.trim(),
             password,
             fullName: fullName.trim(),
-            orgId,
+            inviteToken: inviteToken.trim(),
           })
 
     setSubmitting(false)
@@ -134,7 +161,7 @@ export default function SignupPage({ onSwitchToLogin }: SignupPageProps) {
                 className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
               >
                 <option value="create">Setting up a new organization (becomes Admin)</option>
-                <option value="join">Joining an existing organization (as Reporter)</option>
+                <option value="invite">Joining with an invite code</option>
               </select>
             </div>
 
@@ -169,29 +196,29 @@ export default function SignupPage({ onSwitchToLogin }: SignupPageProps) {
               </div>
             ) : (
               <div>
-                <label htmlFor="orgId" className="block text-sm font-medium text-slate-700">
-                  Organization
+                <label htmlFor="inviteToken" className="block text-sm font-medium text-slate-700">
+                  Invite code
                 </label>
-                <select
-                  id="orgId"
-                  value={orgId}
-                  onChange={(e) => setOrgId(e.target.value)}
-                  disabled={orgsLoading}
-                  className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:opacity-60"
-                >
-                  <option value="">
-                    {orgsLoading ? 'Loading organizations…' : 'Select your organization'}
-                  </option>
-                  {orgOptions.map((org) => (
-                    <option key={org.id} value={org.id}>
-                      {org.name}
-                    </option>
-                  ))}
-                </select>
-                {!orgsLoading && orgOptions.length === 0 && (
-                  <p className="mt-1 text-xs text-slate-500">
-                    No organizations exist yet — choose &quot;Setting up a new organization&quot;
-                    above instead.
+                <input
+                  id="inviteToken"
+                  type="text"
+                  value={inviteToken}
+                  onChange={(e) => setInviteToken(e.target.value)}
+                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-base text-slate-900 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                  placeholder="Paste the code your admin sent you"
+                />
+                {previewLoading && (
+                  <p className="mt-1 text-xs text-slate-500">Checking invite…</p>
+                )}
+                {!previewLoading && invitePreview && invitePreview.isValid && (
+                  <p className="mt-1 text-xs text-green-700">
+                    Valid invite — you&apos;ll join <strong>{invitePreview.orgName}</strong> as{' '}
+                    {invitePreview.role}.
+                  </p>
+                )}
+                {!previewLoading && invitePreview && !invitePreview.isValid && (
+                  <p className="mt-1 text-xs text-red-600">
+                    This invite code is invalid, expired, or already used.
                   </p>
                 )}
               </div>
@@ -281,4 +308,4 @@ export default function SignupPage({ onSwitchToLogin }: SignupPageProps) {
       </div>
     </div>
   )
-      }
+              }
