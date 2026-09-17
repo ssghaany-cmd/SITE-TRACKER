@@ -1,3 +1,14 @@
+// src/types/database.ts
+//
+// TypeScript types that mirror the Supabase Postgres schema exactly.
+// Keep this file in sync with the SQL schema in README.md if columns change.
+//
+// PHASE 3: added Vendor and Subscription types. Note: the Supabase
+// client itself (src/lib/supabaseClient.ts) is intentionally untyped
+// (see that file's comments) after the earlier generic-matching
+// issues, so the `Database` interface below is kept for documentation
+// / potential future use but isn't currently wired into createClient().
+
 export type UserRole = 'reporter' | 'admin' | 'superadmin'
 
 export type IncidentStatus = 'open' | 'in_progress' | 'resolved'
@@ -5,6 +16,8 @@ export type IncidentStatus = 'open' | 'in_progress' | 'resolved'
 export type IncidentPriority = 'low' | 'medium' | 'high'
 
 export type InviteRole = 'reporter' | 'admin'
+
+export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'canceled' | 'incomplete'
 
 export interface Organization {
   id: string
@@ -40,6 +53,7 @@ export interface Incident {
   priority: IncidentPriority
   photo_url: string | null
   assigned_to: string | null
+  vendor_id: string | null
   created_at: string
   resolved_at: string | null
 }
@@ -64,6 +78,29 @@ export interface Invite {
   created_at: string
 }
 
+export interface Vendor {
+  id: string
+  org_id: string
+  name: string
+  contact_name: string
+  phone: string
+  email: string
+  specialty: string
+  created_at: string
+}
+
+export interface Subscription {
+  id: string
+  org_id: string
+  stripe_customer_id: string | null
+  stripe_subscription_id: string | null
+  status: SubscriptionStatus
+  plan: string
+  current_period_end: string | null
+  created_at: string
+  updated_at: string
+}
+
 // -----------------------------------------------------------------
 // Convenience "joined" shapes used by the UI (not raw table rows,
 // but common query result shapes we'll reuse across components).
@@ -73,6 +110,7 @@ export interface IncidentWithRelations extends Incident {
   location?: Pick<Location, 'id' | 'name' | 'address'> | null
   reporter?: Pick<Profile, 'id' | 'full_name'> | null
   assignee?: Pick<Profile, 'id' | 'full_name'> | null
+  vendor?: Pick<Vendor, 'id' | 'name'> | null
 }
 
 export interface IncidentUpdateWithUser extends IncidentUpdate {
@@ -80,9 +118,8 @@ export interface IncidentUpdateWithUser extends IncidentUpdate {
 }
 
 // -----------------------------------------------------------------
-// Supabase generated-style Database type.
-// This lets us type the supabase-js client (createClient<Database>(...))
-// for full autocomplete + type safety on .from('table') and .rpc(...) calls.
+// Supabase generated-style Database type (documentation only — the
+// client is currently untyped; see note at the top of this file).
 // -----------------------------------------------------------------
 
 export interface Database {
@@ -138,6 +175,18 @@ export interface Database {
         Update: Partial<Invite>
         Relationships: []
       }
+      vendors: {
+        Row: Vendor
+        Insert: Partial<Vendor> & { org_id: string; name: string }
+        Update: Partial<Vendor>
+        Relationships: []
+      }
+      subscriptions: {
+        Row: Subscription
+        Insert: Partial<Subscription> & { org_id: string }
+        Update: Partial<Subscription>
+        Relationships: []
+      }
     }
     Views: Record<string, never>
     Functions: {
@@ -161,4 +210,4 @@ export interface Database {
     Enums: Record<string, never>
     CompositeTypes: Record<string, never>
   }
-  }
+}
