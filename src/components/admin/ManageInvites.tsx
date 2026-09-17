@@ -1,12 +1,13 @@
 // src/components/admin/ManageInvites.tsx
 //
 // Lets an admin/superadmin generate shareable invite links for their
-// org (choosing whether the invite grants 'reporter' or 'admin'), and
-// revoke ones that haven't been used yet. The actual token is never
-// exposed via a public/browsable query — this screen is the only
-// place invites are listed, and only to admins of that same org
-// (enforced by the "invites: select admin in org or superadmin" RLS
-// policy from the phase 2 SQL).
+// org (choosing whether the invite grants 'reporter' or 'admin').
+//
+// UPDATED for phase 3: added a recipient email field. When provided,
+// the invite is emailed directly via the send-invite-email Edge
+// Function instead of requiring manual copy/paste. The link is still
+// shown and copyable either way, as a fallback if email delivery
+// fails or isn't set up yet.
 
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabaseClient'
@@ -22,8 +23,10 @@ export default function ManageInvites() {
   const [error, setError] = useState<string | null>(null)
 
   const [role, setRole] = useState<InviteRole>('reporter')
+  const [recipientEmail, setRecipientEmail] = useState('')
   const [generating, setGenerating] = useState(false)
   const [generatedLink, setGeneratedLink] = useState<string | null>(null)
+  const [emailStatus, setEmailStatus] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [revokingId, setRevokingId] = useState<string | null>(null)
 
@@ -56,6 +59,7 @@ export default function ManageInvites() {
     setGenerating(true)
     setError(null)
     setGeneratedLink(null)
+    setEmailStatus(null)
     setCopied(false)
 
     const { data, error: insertError } = await supabase
@@ -68,15 +72,31 @@ export default function ManageInvites() {
       .select()
       .single()
 
-    setGenerating(false)
-
     if (insertError || !data) {
+      setGenerating(false)
       setError(insertError?.message ?? 'Failed to generate invite.')
       return
     }
 
     const link = `${window.location.origin}${window.location.pathname}?invite=${data.token}`
     setGeneratedLink(link)
+
+    if (recipientEmail.trim()) {
+      const { error: fnError } = await supabase.functions.invoke('send-invite-email', {
+        body: { to: recipientEmail.trim(), inviteLink: link, role },
+      })
+
+      if (fnError) {
+        setEmailStatus(
+          `Invite created, but the email couldn't be sent (${fnError.message}). Share the link below manually instead.`
+        )
+      } else {
+        setEmailStatus(`Invite emailed to ${recipientEmail.trim()}.`)
+      }
+    }
+
+    setGenerating(false)
+    setRecipientEmail('')
     fetchInvites()
   }
 
@@ -114,20 +134,39 @@ export default function ManageInvites() {
       <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Generate an Invite</h3>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <div className="flex-1">
-            <label htmlFor="invite-role" className="block text-sm font-medium text-slate-700">
-              Role for this invite
-            </label>
-            <select
-              id="invite-role"
-              value={role}
-              onChange={(e) => setRole(e.target.value as InviteRole)}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
-            >
-              <option value="reporter">Reporter</option>
-              <option value="admin">Admin</option>
-            </select>
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label htmlFor="invite-role" className="block text-sm font-medium text-slate-700">
+                Role for this invite
+              </label>
+              <select
+                id="invite-role"
+                value={role}
+                onChange={(e) => setRole(e.target.value as InviteRole)}
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+              >
+                <option value="reporter">Reporter</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+
+            <div>
+              <label
+                htmlFor="invite-email"
+                className="block text-sm font-medium text-slate-700"
+              >
+                Email it to (optional)
+              </label>
+              <input
+                id="invite-email"
+                type="email"
+                value={recipientEmail}
+                onChange={(e) => setRecipientEmail(e.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-base text-slate-900 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                placeholder="teammate@company.com"
+              />
+            </div>
           </div>
 
           <button
@@ -136,13 +175,19 @@ export default function ManageInvites() {
             disabled={generating}
             className="rounded-md bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800 active:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {generating ? 'Generating…' : 'Generate Invite Link'}
+            {generating ? 'Generating…' : 'Generate Invite'}
           </button>
         </div>
 
+        {emailStatus && (
+          <div className="mt-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+            {emailStatus}
+          </div>
+        )}
+
         {generatedLink && (
           <div className="mt-4 rounded-md border border-green-200 bg-green-50 p-3">
-            <p className="text-sm text-green-800">Share this link — it works once:</p>
+            <p className="text-sm text-green-800">Invite link (works once):</p>
             <div className="mt-2 flex flex-col gap-2 sm:flex-row">
               <input
                 type="text"
@@ -217,4 +262,4 @@ export default function ManageInvites() {
       </div>
     </div>
   )
-                    }
+              }
