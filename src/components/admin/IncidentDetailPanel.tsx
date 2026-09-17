@@ -2,13 +2,16 @@
 //
 // Detail panel for a selected incident: full description, photo,
 // status + assignee controls (update immediately on change — no
-// separate save button), and the embedded activity log. Rendered
-// inline below the table (not a modal), so it works the same way on
-// mobile as everywhere else in the app.
+// separate save button), vendor assignment, and the embedded activity
+// log. Rendered inline below the table (not a modal).
+//
+// UPDATED for phase 3: added a "Vendor" dropdown alongside the
+// existing internal "Assigned To" dropdown — an incident can be
+// handled by an internal team member, an external vendor, or both.
 
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabaseClient'
-import type { IncidentWithRelations, IncidentStatus, Profile } from '../../types/database'
+import type { IncidentWithRelations, IncidentStatus, Profile, Vendor } from '../../types/database'
 import StatusBadge from '../shared/StatusBadge'
 import PriorityBadge from '../shared/PriorityBadge'
 import ActivityLog from './ActivityLog'
@@ -18,6 +21,7 @@ import { getSignedPhotoUrl } from '../../utils/storage'
 interface IncidentDetailPanelProps {
   incident: IncidentWithRelations
   orgMembers: Pick<Profile, 'id' | 'full_name'>[]
+  vendors: Pick<Vendor, 'id' | 'name'>[]
   currentUserId: string
   onUpdated: () => void
   onClose: () => void
@@ -32,6 +36,7 @@ const STATUS_OPTIONS: { value: IncidentStatus; label: string }[] = [
 export default function IncidentDetailPanel({
   incident,
   orgMembers,
+  vendors,
   currentUserId,
   onUpdated,
   onClose,
@@ -86,6 +91,24 @@ export default function IncidentDetailPanel({
     onUpdated()
   }
 
+  const handleVendorChange = async (vendorId: string) => {
+    setUpdating(true)
+    setError(null)
+
+    const { error: updateError } = await supabase
+      .from('incidents')
+      .update({ vendor_id: vendorId || null })
+      .eq('id', incident.id)
+
+    setUpdating(false)
+
+    if (updateError) {
+      setError(updateError.message)
+      return
+    }
+    onUpdated()
+  }
+
   return (
     <div className="rounded-lg border border-slate-300 bg-white p-4 shadow-sm sm:p-6">
       <div className="flex items-start justify-between gap-2">
@@ -126,7 +149,7 @@ export default function IncidentDetailPanel({
         {incident.resolved_at && <p>Resolved {formatDate(incident.resolved_at)}</p>}
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div>
           <label htmlFor="detail-status" className="block text-xs font-medium text-slate-600">
             Status
@@ -148,7 +171,7 @@ export default function IncidentDetailPanel({
 
         <div>
           <label htmlFor="detail-assignee" className="block text-xs font-medium text-slate-600">
-            Assigned To
+            Assigned To (Internal)
           </label>
           <select
             id="detail-assignee"
@@ -161,6 +184,26 @@ export default function IncidentDetailPanel({
             {orgMembers.map((member) => (
               <option key={member.id} value={member.id}>
                 {member.full_name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label htmlFor="detail-vendor" className="block text-xs font-medium text-slate-600">
+            Vendor (External)
+          </label>
+          <select
+            id="detail-vendor"
+            value={incident.vendor_id ?? ''}
+            disabled={updating}
+            onChange={(e) => handleVendorChange(e.target.value)}
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:opacity-60"
+          >
+            <option value="">None</option>
+            {vendors.map((vendor) => (
+              <option key={vendor.id} value={vendor.id}>
+                {vendor.name}
               </option>
             ))}
           </select>
