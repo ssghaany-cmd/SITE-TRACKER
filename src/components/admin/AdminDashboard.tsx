@@ -3,18 +3,17 @@
 // Top-level container for the admin/superadmin role. Fetches all
 // org-visible incidents once (unfiltered, so stats always reflect
 // true totals), applies filters client-side for the table, and
-// fetches the org member list once for the assignee dropdown.
+// fetches the org member + vendor lists once for the assignment
+// dropdowns.
 //
-// UPDATED for phase 2: added tab navigation between the original
-// Incidents view and three new management screens (Locations, Team,
-// Invites). Tabs are plain local state — no router/new dependency.
+// UPDATED for phase 3: added Vendors, Billing, and Reports tabs.
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useIncidents, type IncidentFilters as IncidentFiltersState } from '../../hooks/useIncidents'
 import { useLocations } from '../../hooks/useLocations'
 import { supabase } from '../../lib/supabaseClient'
-import type { Profile } from '../../types/database'
+import type { Profile, Vendor } from '../../types/database'
 import StatsHeader from '../layout/StatsHeader'
 import IncidentFilters from './IncidentFilters'
 import IncidentTable from './IncidentTable'
@@ -22,14 +21,20 @@ import IncidentDetailPanel from './IncidentDetailPanel'
 import ManageLocations from './ManageLocations'
 import ManageTeam from './ManageTeam'
 import ManageInvites from './ManageInvites'
+import ManageVendors from './ManageVendors'
+import ManageBilling from './ManageBilling'
+import ReportsAnalytics from './ReportsAnalytics'
 
-type AdminTab = 'incidents' | 'locations' | 'team' | 'invites'
+type AdminTab = 'incidents' | 'locations' | 'team' | 'invites' | 'vendors' | 'billing' | 'reports'
 
 const TABS: { id: AdminTab; label: string }[] = [
   { id: 'incidents', label: 'Incidents' },
+  { id: 'reports', label: 'Reports' },
   { id: 'locations', label: 'Locations' },
+  { id: 'vendors', label: 'Vendors' },
   { id: 'team', label: 'Team' },
   { id: 'invites', label: 'Invites' },
+  { id: 'billing', label: 'Billing' },
 ]
 
 export default function AdminDashboard() {
@@ -46,6 +51,7 @@ export default function AdminDashboard() {
   })
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null)
   const [orgMembers, setOrgMembers] = useState<Pick<Profile, 'id' | 'full_name'>[]>([])
+  const [vendors, setVendors] = useState<Pick<Vendor, 'id' | 'name'>[]>([])
 
   const fetchOrgMembers = useCallback(async () => {
     if (!profile) return
@@ -62,9 +68,25 @@ export default function AdminDashboard() {
     setOrgMembers((data ?? []) as Pick<Profile, 'id' | 'full_name'>[])
   }, [profile])
 
+  const fetchVendorsList = useCallback(async () => {
+    if (!profile) return
+    const { data, error: vendorsError } = await supabase
+      .from('vendors')
+      .select('id, name')
+      .eq('org_id', profile.org_id)
+      .order('name', { ascending: true })
+
+    if (vendorsError) {
+      console.error('Failed to fetch vendors:', vendorsError.message)
+      return
+    }
+    setVendors((data ?? []) as Pick<Vendor, 'id' | 'name'>[])
+  }, [profile])
+
   useEffect(() => {
     fetchOrgMembers()
-  }, [fetchOrgMembers])
+    fetchVendorsList()
+  }, [fetchOrgMembers, fetchVendorsList])
 
   const filteredIncidents = useMemo(() => {
     return incidents.filter((incident) => {
@@ -139,6 +161,7 @@ export default function AdminDashboard() {
             <IncidentDetailPanel
               incident={selectedIncident}
               orgMembers={orgMembers}
+              vendors={vendors}
               currentUserId={profile.id}
               onUpdated={refetch}
               onClose={() => setSelectedIncidentId(null)}
@@ -147,9 +170,12 @@ export default function AdminDashboard() {
         </>
       )}
 
+      {activeTab === 'reports' && <ReportsAnalytics />}
       {activeTab === 'locations' && <ManageLocations />}
+      {activeTab === 'vendors' && <ManageVendors />}
       {activeTab === 'team' && <ManageTeam />}
       {activeTab === 'invites' && <ManageInvites />}
+      {activeTab === 'billing' && <ManageBilling />}
     </div>
   )
 }
