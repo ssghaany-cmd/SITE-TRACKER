@@ -2,13 +2,20 @@
 //
 // Top-level app shell. Wraps everything in AuthProvider, then the
 // AuthGate component decides what to show based on session/profile
-// state: login/signup, a "no profile found" fallback, or the correct
+// state: password recovery (takes priority over everything else),
+// login/signup, a "no profile found" fallback, or the correct
 // role-based view (reporter vs admin/superadmin).
+//
+// PHASE 4: added the isPasswordRecovery check, which must come before
+// the normal session check — a recovery link creates a session, but
+// we don't want to drop the user straight into the dashboard before
+// they've actually set a new password.
 
 import { useState } from 'react'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import LoginPage from './components/auth/LoginPage'
 import SignupPage from './components/auth/SignupPage'
+import ResetPasswordPage from './components/auth/ResetPasswordPage'
 import Header from './components/layout/Header'
 import ReporterView from './components/reporter/ReporterView'
 import AdminDashboard from './components/admin/AdminDashboard'
@@ -17,7 +24,7 @@ import LoadingSpinner from './components/shared/LoadingSpinner'
 type AuthScreen = 'login' | 'signup'
 
 function AuthGate() {
-  const { session, profile, loading, signOut } = useAuth()
+  const { session, profile, loading, signOut, isPasswordRecovery } = useAuth()
   const [authScreen, setAuthScreen] = useState<AuthScreen>('login')
 
   if (loading) {
@@ -26,6 +33,10 @@ function AuthGate() {
         <LoadingSpinner label="Loading SiteTrack…" size="lg" />
       </div>
     )
+  }
+
+  if (isPasswordRecovery) {
+    return <ResetPasswordPage />
   }
 
   if (!session) {
@@ -70,4 +81,4 @@ export default function App() {
       <AuthGate />
     </AuthProvider>
   )
-        }
+      }
