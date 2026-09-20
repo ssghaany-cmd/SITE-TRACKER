@@ -2,23 +2,19 @@
 //
 // Central identity provider for the app. Tracks the Supabase auth session
 // and the matching `profiles` row (role + org_id), and exposes sign in /
-// sign up (create-new-org or redeem-invite) / sign out actions via the
-// useAuth() hook.
+// sign up (create-new-org or redeem-invite) / sign out / password-reset
+// actions via the useAuth() hook.
 //
-// FIX: signUp() returns a `user` object even when Supabase's "Confirm
-// email" setting is ON — but in that case there's no active `session`
-// yet, so an immediate .rpc() call runs UNAUTHENTICATED (auth.uid() is
-// null inside the database function), which previously surfaced as a
-// confusing raw Postgres error ("null value in column 'id' ..."). We
-// now check for `session` (not just `user`) before attempting the RPC,
-// and show a clear message instead.
-//
-// NOTE: with email confirmation ON, the org/invite RPC genuinely cannot
-// run until the user has a session — and this app doesn't yet persist
-// "finish creating my org" across the confirmation-email round trip.
-// For now, either keep "Confirm email" OFF in Supabase (recommended
-// for internal rollout — see README), or treat this message as a
-// signal to build a proper "resume after confirming" flow later.
+// PHASE 4: added password reset support.
+//   - requestPasswordReset(email): sends the user a reset link
+//   - Supabase redirects them back to this same app with a recovery
+//     token in the URL; supabase-js (detectSessionInUrl: true, already
+//     set in supabaseClient.ts) picks this up automatically and fires
+//     a 'PASSWORD_RECOVERY' auth event, which we catch below and flip
+//     `isPasswordRecovery` to true.
+//   - App.tsx checks `isPasswordRecovery` and shows ResetPasswordPage
+//     instead of the normal login/dashboard flow until they set a new
+//     password via updatePassword().
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
@@ -50,12 +46,15 @@ interface AuthContextValue {
   user: User | null
   profile: Profile | null
   loading: boolean
+  isPasswordRecovery: boolean
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signUpCreateOrg: (params: SignUpCreateOrgParams) => Promise<{ error: string | null }>
   signUpWithInvite: (params: SignUpWithInviteParams) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
   previewInvite: (token: string) => Promise<InvitePreview>
   refreshProfile: () => Promise<void>
+  requestPasswordReset: (email: string) => Promise<{ error: string | null }>
+  updatePassword: (newPassword: string) => Promise<{ error: string | null }>
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -70,6 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false)
 
   const loadProfile = useCallback(async (userId: string) => {
     const { data, error } = await supabase
@@ -102,9 +102,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     })
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession)
       setUser(newSession?.user ?? null)
+
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsPasswordRecovery(true)
+      }
+
       if (newSession?.user) {
         loadProfile(newSession.user.id)
       } else {
@@ -137,9 +142,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       if (signUpError) return { error: signUpError.message }
 
-      // signUp() can return a `user` even when there's no active
-      // `session` yet (email confirmation required). Without a
-      // session, the RPC below would run unauthenticated and fail.
       if (!signUpData.session) {
         return { error: EMAIL_CONFIRMATION_MESSAGE }
       }
@@ -205,17 +207,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  const requestPasswordReset = useCallback(async (email: string) => {
+    const redirectTo = `${window.location.origin}${window.location.pathname}`
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
+    return { error: error?.message ?? null }
+  }, [])
+
+  const updatePassword = useCallback(async (newPassword: string) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    if (!error) {
+      setIsPasswordRecovery(false)
+    }
+    return { error: error?.message ?? null }
+  }, [])
+
   const value: AuthContextValue = {
     session,
     user,
     profile,
     loading,
+    isPasswordRecovery,
     signIn,
     signUpCreateOrg,
     signUpWithInvite,
     signOut,
     previewInvite,
     refreshProfile,
+    requestPasswordReset,
+    updatePassword,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
@@ -227,4 +246,4 @@ export function useAuth(): AuthContextValue {
     throw new Error('useAuth must be used within an AuthProvider')
   }
   return ctx
-              }
+    }
